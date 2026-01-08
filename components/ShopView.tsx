@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { Coins, Zap, HeartPulse, CreditCard, ShoppingBag, ArrowRight, Bandage, Megaphone, Banknote, Star, WifiOff } from 'lucide-react';
+import { Coins, Zap, HeartPulse, CreditCard, ShoppingBag, ArrowRight, Bandage, Megaphone, Banknote, Star, WifiOff, Loader2, CheckCircle2, XCircle, Lock, ShieldCheck } from 'lucide-react';
 
 interface ShopViewProps {
     goldCoins: number;
@@ -7,8 +8,12 @@ interface ShopViewProps {
     onBuyBoost: (type: 'RECOVERY' | 'HEAL' | 'MORALE' | 'BUDGET', cost: number) => void;
 }
 
+type PaymentStatus = 'IDLE' | 'PROCESSING' | 'VERIFYING' | 'SUCCESS' | 'FAILED';
+
 const ShopView: React.FC<ShopViewProps> = ({ goldCoins, onBuyCoins, onBuyBoost }) => {
     const [isOnline, setIsOnline] = useState(navigator.onLine);
+    const [selectedPack, setSelectedPack] = useState<{ id: number, amount: number, cost: string, label: string } | null>(null);
+    const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('IDLE');
 
     useEffect(() => {
         const handleOnline = () => setIsOnline(true);
@@ -22,6 +27,44 @@ const ShopView: React.FC<ShopViewProps> = ({ goldCoins, onBuyCoins, onBuyBoost }
             window.removeEventListener('offline', handleOffline);
         };
     }, []);
+
+    const handleInitiatePurchase = (pack: any) => {
+        if (!isOnline) {
+            alert("Internet connection required for purchases.");
+            return;
+        }
+        setSelectedPack(pack);
+        setPaymentStatus('IDLE');
+    };
+
+    const processPayment = async () => {
+        if (!selectedPack) return;
+        if (!isOnline) {
+            setPaymentStatus('FAILED');
+            return;
+        }
+
+        setPaymentStatus('PROCESSING');
+        
+        // Simulate Payment Gateway delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        setPaymentStatus('VERIFYING');
+        
+        // Simulate Verification delay
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // 95% success rate simulation
+        if (Math.random() > 0.05) {
+            setPaymentStatus('SUCCESS');
+            setTimeout(() => {
+                onBuyCoins(selectedPack.amount, selectedPack.cost);
+                setTimeout(() => setSelectedPack(null), 1500);
+            }, 1000);
+        } else {
+            setPaymentStatus('FAILED');
+        }
+    };
 
     const coinPacks = [
         { id: 1, amount: 100, cost: '$0.99', label: 'Handful of Coins', icon: <Coins size={24} className="text-yellow-200" /> },
@@ -66,7 +109,99 @@ const ShopView: React.FC<ShopViewProps> = ({ goldCoins, onBuyCoins, onBuyBoost }
     ];
 
     return (
-        <div className="h-full flex flex-col bg-slate-950 overflow-hidden">
+        <div className="h-full flex flex-col bg-slate-950 overflow-hidden relative">
+            {/* Payment Modal */}
+            {selectedPack && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col">
+                        <div className="bg-slate-950 p-4 border-b border-slate-800 flex justify-between items-center">
+                            <div className="flex items-center gap-2 text-white font-bold">
+                                <ShieldCheck size={18} className="text-emerald-500" />
+                                Secure Checkout
+                            </div>
+                            <button onClick={() => setSelectedPack(null)} disabled={paymentStatus === 'PROCESSING' || paymentStatus === 'VERIFYING'} className="text-slate-500 hover:text-white disabled:opacity-30">
+                                <XCircle size={20} />
+                            </button>
+                        </div>
+                        
+                        <div className="p-6 flex flex-col items-center text-center">
+                            {paymentStatus === 'IDLE' && (
+                                <>
+                                    <div className="w-16 h-16 bg-yellow-500/20 rounded-full flex items-center justify-center mb-4 text-yellow-400 border border-yellow-500/30">
+                                        <Coins size={32} />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-white mb-1">{selectedPack.amount} Gold Coins</h3>
+                                    <p className="text-slate-400 text-sm mb-6">{selectedPack.label}</p>
+                                    
+                                    <div className="w-full bg-slate-800/50 rounded-lg p-4 border border-slate-800 mb-6 flex justify-between items-center">
+                                        <span className="text-sm font-bold text-slate-400">Total</span>
+                                        <span className="text-2xl font-bold text-white">{selectedPack.cost}</span>
+                                    </div>
+
+                                    <button 
+                                        onClick={processPayment}
+                                        className="w-full py-3 bg-white text-slate-950 font-bold rounded-xl hover:bg-emerald-400 transition-all flex items-center justify-center gap-2"
+                                    >
+                                        <Lock size={16} /> Pay Now
+                                    </button>
+                                    <p className="text-[10px] text-slate-500 mt-3 flex items-center justify-center gap-1">
+                                        <ShieldCheck size={10} /> Payments processed securely via MockPay
+                                    </p>
+                                </>
+                            )}
+
+                            {(paymentStatus === 'PROCESSING' || paymentStatus === 'VERIFYING') && (
+                                <div className="py-8 flex flex-col items-center">
+                                    <div className="relative mb-4">
+                                        <Loader2 size={48} className="text-emerald-500 animate-spin" />
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <Lock size={16} className="text-emerald-500" />
+                                        </div>
+                                    </div>
+                                    <h3 className="text-lg font-bold text-white mb-2">
+                                        {paymentStatus === 'PROCESSING' ? 'Processing Payment...' : 'Verifying Transaction...'}
+                                    </h3>
+                                    <p className="text-slate-400 text-sm animate-pulse">Do not close this window</p>
+                                </div>
+                            )}
+
+                            {paymentStatus === 'SUCCESS' && (
+                                <div className="py-4 flex flex-col items-center animate-in zoom-in duration-300">
+                                    <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center mb-4 text-emerald-400 border border-emerald-500/30">
+                                        <CheckCircle2 size={40} />
+                                    </div>
+                                    <h3 className="text-2xl font-bold text-white mb-2">Payment Successful!</h3>
+                                    <p className="text-slate-400 text-sm mb-4">
+                                        Your {selectedPack.amount} Coins have been added to your account.
+                                    </p>
+                                    <div className="text-xs text-slate-500 font-mono">
+                                        Trans ID: #TX-{Math.floor(Math.random()*1000000)}
+                                    </div>
+                                </div>
+                            )}
+
+                            {paymentStatus === 'FAILED' && (
+                                <div className="py-4 flex flex-col items-center">
+                                    <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-4 text-red-400 border border-red-500/30">
+                                        <XCircle size={40} />
+                                    </div>
+                                    <h3 className="text-xl font-bold text-white mb-2">Payment Failed</h3>
+                                    <p className="text-slate-400 text-sm mb-6">
+                                        {!isOnline ? "Network connection lost." : "The transaction could not be verified."}
+                                    </p>
+                                    <button 
+                                        onClick={() => setPaymentStatus('IDLE')}
+                                        className="px-6 py-2 bg-slate-800 text-white font-bold rounded-lg hover:bg-slate-700"
+                                    >
+                                        Try Again
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="p-8 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between shrink-0">
                 <div>
@@ -108,7 +243,7 @@ const ShopView: React.FC<ShopViewProps> = ({ goldCoins, onBuyCoins, onBuyBoost }
                             {coinPacks.map(pack => (
                                 <button 
                                     key={pack.id}
-                                    onClick={() => isOnline && onBuyCoins(pack.amount, pack.cost)}
+                                    onClick={() => handleInitiatePurchase(pack)}
                                     disabled={!isOnline}
                                     className="relative flex items-center justify-between p-4 rounded-xl border border-slate-700 bg-slate-900 hover:border-yellow-500/50 hover:bg-slate-800 transition-all group overflow-hidden disabled:cursor-not-allowed"
                                 >

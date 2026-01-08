@@ -12,6 +12,7 @@ interface MatchViewProps {
   soundEnabled?: boolean;
 }
 
+// Zone Logic: -1 (My Defense / Opp Attack), 0 (Midfield), 1 (My Attack / Opp Defense)
 const ZONES = {
     DEFENSE: -1,
     MIDFIELD: 0,
@@ -26,6 +27,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [score, setScore] = useState({ home: 0, away: 0 });
   const [ballZone, setBallZone] = useState(0); 
+  const [possessionSide, setPossessionSide] = useState<'HOME' | 'AWAY'>('HOME');
   const [momentum, setMomentum] = useState(50);
   const [possessionCount, setPossessionCount] = useState({ home: 0, away: 0 });
   const [stats, setStats] = useState<MatchStats>({
@@ -34,7 +36,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
   const [momentumData, setMomentumData] = useState<{minute: number, value: number}[]>([]);
 
   // Team Management State
-  const [liveMyTeam, setLiveMyTeam] = useState<Team>(JSON.parse(JSON.stringify(myTeam))); // Deep copy for mutation
+  const [liveMyTeam, setLiveMyTeam] = useState<Team>(JSON.parse(JSON.stringify(myTeam))); 
   const [activeTab, setActiveTab] = useState<'MATCH' | 'TACTICS' | 'SUBS'>('MATCH');
   const [subsMade, setSubsMade] = useState(0);
   const [selectedBenchPlayer, setSelectedBenchPlayer] = useState<string | null>(null);
@@ -50,7 +52,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
     }
   }, []);
 
-  const playSound = (type: 'GOAL' | 'WHISTLE' | 'KICK') => {
+  const playSound = (type: 'GOAL' | 'WHISTLE' | 'KICK' | 'CROWD') => {
     if (!soundEnabled) return;
     const ctx = audioCtxRef.current;
     if (!ctx) return;
@@ -93,10 +95,22 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
   }, [events]);
 
   // --- HELPER FUNCTIONS ---
-  const getRandomPlayer = (team: Team, positions: Position[]) => {
-      const candidates = team.players.filter(p => p.squadStatus === SquadStatus.STARTING && positions.includes(p.position));
-      if (candidates.length === 0) return team.players.find(p => p.squadStatus === SquadStatus.STARTING) || team.players[0];
-      return candidates[Math.floor(Math.random() * candidates.length)];
+  
+  // Select player based on position strictness
+  const getPlayersByPosition = (team: Team, positions: Position[]) => {
+      return team.players.filter(p => p.squadStatus === SquadStatus.STARTING && positions.includes(p.position));
+  };
+
+  const getBestPlayerForAction = (team: Team, positions: Position[], stat: keyof Player) => {
+      const candidates = getPlayersByPosition(team, positions);
+      if (candidates.length === 0) return team.players[0]; // Fallback
+      
+      // Sort by relevant stat + random variance for realism
+      return candidates.sort((a, b) => {
+          const valA = (a[stat] as number) * (a.condition/100) + Math.random() * 20;
+          const valB = (b[stat] as number) * (b.condition/100) + Math.random() * 20;
+          return valB - valA;
+      })[0];
   };
 
   const getConditionDecay = (pressing: PressingIntensity) => {
@@ -109,6 +123,26 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
       }
   };
 
+  // Tactical Multipliers
+  const getFormationBonus = (formation: string, zone: number) => {
+      // Return a small multiplier based on player density in zones
+      // Simplified density map
+      const map: Record<string, number[]> = {
+          '4-4-2': [4, 4, 2], // Def, Mid, Att
+          '4-3-3': [4, 3, 3],
+          '3-5-2': [3, 5, 2],
+          '5-3-2': [5, 3, 2],
+          '4-2-3-1': [4, 5, 1]
+      };
+      const density = map[formation] || [4,4,2];
+      
+      // Zone 0 = Midfield (index 1)
+      if (zone === ZONES.MIDFIELD) return density[1] * 2;
+      if (zone === ZONES.DEFENSE) return density[0] * 2;
+      if (zone === ZONES.ATTACK) return density[2] * 2;
+      return 0;
+  };
+
   // --- MATCH SIMULATION ENGINE ---
   const simulateMinute = () => {
       if (minute >= 90) {
@@ -118,7 +152,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
           return;
       }
 
-      // 1. Apply Fatigue
+      // 1. FATIGUE SYSTEM
       const decay = getConditionDecay(liveMyTeam.tactics.pressing);
       const updatedPlayers = liveMyTeam.players.map(p => {
           if (p.squadStatus === SquadStatus.STARTING && p.condition > 0) {
@@ -128,112 +162,170 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
       });
       setLiveMyTeam(prev => ({ ...prev, players: updatedPlayers }));
 
-      // 2. Calculate Tactical Power
-      const myAvgCondition = updatedPlayers.filter(p => p.squadStatus === SquadStatus.STARTING).reduce((a,b) => a + b.condition, 0) / 11;
-      const fatiguePenalty = (100 - myAvgCondition) / 2; // Up to -50 rating penalty if exhausted
-
-      let homePower = (liveMyTeam.rating || 75) - (fatiguePenalty * 0.1); // Reduced penalty impact
-      let awayPower = opponent.rating || 72;
-
-      // Tactical Boosts
-      if (liveMyTeam.tactics.pressing === PressingIntensity.GEGENPRESS && ballZone === ZONES.ATTACK) homePower += 5;
-      if (liveMyTeam.tactics.defensiveLine === DefensiveLine.DEEP && ballZone === ZONES.DEFENSE) homePower += 5;
-      if (liveMyTeam.tactics.passing === PassingStyle.DIRECT && ballZone === ZONES.MIDFIELD) homePower += 3;
-
-      // 3. Engine Logic
+      // 2. STATE PREPARATION
+      let newMomentum = momentum;
       let nextZone = ballZone;
+      let nextPossession = possessionSide;
       let event: MatchEvent | null = null;
-      let newMomentum = momentum + (homePower > awayPower ? 0.5 : -0.5);
-      if (newMomentum > 100) newMomentum = 100; if (newMomentum < 0) newMomentum = 0;
 
-      const roll = Math.random() * 100;
-      
-      // Possession Tracking
-      if (ballZone > 0 || (ballZone === 0 && roll > 50)) setPossessionCount(p => ({ ...p, home: p.home + 1 }));
+      // Stats Update helper
+      const updateStats = (updates: Partial<MatchStats>) => setStats(prev => ({ ...prev, ...updates }));
+
+      // Possession Counter
+      if (possessionSide === 'HOME') setPossessionCount(p => ({ ...p, home: p.home + 1 }));
       else setPossessionCount(p => ({ ...p, away: p.away + 1 }));
 
+      // --- TACTICAL RESOLUTION ---
+      
+      // MIDFIELD BATTLE (Zone 0)
       if (ballZone === ZONES.MIDFIELD) {
-          // MIDFIELD BATTLE
-          const myMid = getRandomPlayer(liveMyTeam, [Position.MID]);
-          const oppMid = getRandomPlayer(opponent, [Position.MID]); // Simulated
-          
-          const myRoll = myMid.passing + (myMid.dribbling/2) + (momentum/10);
-          const oppRoll = 75 + ((100-momentum)/10); // Generic opponent stat
+          const myBonus = getFormationBonus(liveMyTeam.formation, ZONES.MIDFIELD);
+          const oppBonus = getFormationBonus(opponent.formation, ZONES.MIDFIELD); // Assume generic Opp formation usually
 
-          if (Math.random() * 200 < myRoll) {
-              nextZone = ZONES.ATTACK;
-              if (Math.random() > 0.7) {
-                  setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(myMid.name)} finds space and drives forward!`, teamName: liveMyTeam.name }]);
+          const myMid = getBestPlayerForAction(liveMyTeam, [Position.MID], 'passing');
+          const oppMid = getBestPlayerForAction(opponent, [Position.MID], 'defending'); // Opponent tries to stop us
+
+          // Tactic: LONG BALL skips midfield contest but reduces control
+          if (possessionSide === 'HOME' && liveMyTeam.tactics.passing === PassingStyle.LONG_BALL && Math.random() > 0.5) {
+               nextZone = ZONES.ATTACK;
+               setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(liveMyTeam.players.find(p=>p.position === Position.DEF)?.name || 'Defender')} launches a long ball forward!`, teamName: liveMyTeam.name }]);
+          } 
+          // Standard Midfield Play
+          else {
+              let homeStrength = (myMid.passing * 0.6 + myMid.dribbling * 0.4) + myBonus + (momentum / 10);
+              let awayStrength = (oppMid.defending * 0.6 + oppMid.physical * 0.4) + oppBonus + ((100 - momentum) / 10);
+
+              if (liveMyTeam.tactics.passing === PassingStyle.SHORT) homeStrength += 10; // Better retention
+              if (liveMyTeam.tactics.pressing === PressingIntensity.HIGH_PRESS) awayStrength += 5; // Harder to pass vs press
+
+              if (possessionSide === 'HOME') {
+                  if (Math.random() * (homeStrength + awayStrength) < homeStrength) {
+                      nextZone = ZONES.ATTACK; // Advance
+                      // Flavor text
+                      const action = Math.random() > 0.5 ? 'plays a beautiful through ball' : 'dribbles past his marker';
+                      setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(myMid.name)} ${action}.`, teamName: liveMyTeam.name }]);
+                  } else {
+                      nextPossession = 'AWAY'; // Lost ball
+                      setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(oppMid.name)} intercepts the pass.`, teamName: opponent.name }]);
+                  }
+              } else {
+                  // Opponent has ball
+                  if (Math.random() * (homeStrength + awayStrength) < awayStrength) {
+                      nextZone = ZONES.DEFENSE; // They advance to my defense
+                  } else {
+                      nextPossession = 'HOME'; // We won it back
+                      const myWinner = getBestPlayerForAction(liveMyTeam, [Position.MID, Position.DEF], 'defending');
+                      setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(myWinner.name)} wins possession in midfield.`, teamName: liveMyTeam.name }]);
+                  }
               }
-          } else {
-              nextZone = ZONES.DEFENSE;
-              setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(opponent.name)} wins the midfield battle.`, teamName: opponent.name }]);
           }
-      } 
+      }
+
+      // ATTACKING PHASE (Zone 1 - My Attack / Opp Defense)
       else if (ballZone === ZONES.ATTACK) {
-          // ATTACKING PHASE
-          const myAtt = getRandomPlayer(liveMyTeam, [Position.FWD, Position.MID]);
-          const chanceCreation = myAtt.dribbling + myAtt.passing + (liveMyTeam.tactics.passing === PassingStyle.DIRECT ? 10 : 0);
-          
-          if (Math.random() * 200 < chanceCreation) {
-              // SHOT CREATED
-              const shooter = getRandomPlayer(liveMyTeam, [Position.FWD]);
-              const xg = 0.1 + (Math.random() * 0.5);
-              setStats(s => ({ ...s, shotsHome: s.shotsHome + 1, xgHome: (s.xgHome || 0) + xg }));
-              
-              const shotQuality = shooter.shooting + (shooter.condition / 10) + (momentum / 10);
-              const saveDifficulty = 70 + (Math.random() * 30); // Opponent GK
+          if (possessionSide === 'HOME') {
+              // Creating a chance
+              const creator = getBestPlayerForAction(liveMyTeam, [Position.MID, Position.FWD], 'passing');
+              const finisher = getBestPlayerForAction(liveMyTeam, [Position.FWD], 'shooting');
+              const oppDef = getBestPlayerForAction(opponent, [Position.DEF], 'defending');
 
-              if (shotQuality > saveDifficulty) {
-                  // GOAL
-                  event = { minute: minute + 1, type: 'GOAL', description: `GOAL!!! ${String(shooter.name)} fires it home!`, teamName: liveMyTeam.name };
-                  setScore(s => ({ ...s, home: s.home + 1 }));
-                  nextZone = ZONES.MIDFIELD;
-                  newMomentum = 80;
-                  playSound('GOAL');
+              let attackRoll = (creator.passing + finisher.dribbling) / 2 + (momentum/5);
+              let defenseRoll = oppDef.defending + (oppDef.physical/2);
+
+              if (liveMyTeam.tactics.passing === PassingStyle.DIRECT) attackRoll += 5;
+
+              if (Math.random() * (attackRoll + defenseRoll) < attackRoll) {
+                  // SHOT TAKEN
+                  updateStats({ shotsHome: stats.shotsHome + 1 });
+                  const shotQuality = finisher.shooting + Math.random() * 20;
+                  const gkQuality = 75 + Math.random() * 20; // Opponent GK
+                  const xG = shotQuality / 200;
+                  updateStats({ xgHome: stats.xgHome + xG });
+
+                  if (shotQuality > gkQuality) {
+                      // GOAL
+                      event = { minute: minute + 1, type: 'GOAL', description: `GOAL!!! ${String(finisher.name)} scores with a brilliant finish!`, teamName: liveMyTeam.name };
+                      setScore(s => ({ ...s, home: s.home + 1 }));
+                      nextZone = ZONES.MIDFIELD; // Reset
+                      nextPossession = 'AWAY';
+                      newMomentum = 70;
+                      playSound('GOAL');
+                  } else {
+                      // SAVE/MISS
+                      event = { minute: minute + 1, type: 'CHANCE', description: `Saved! The keeper denies ${String(finisher.name)}.`, teamName: liveMyTeam.name };
+                      nextZone = ZONES.MIDFIELD; // Cleared
+                      nextPossession = 'AWAY'; // GK catches or clears
+                      playSound('KICK');
+                  }
               } else {
-                  // MISS/SAVE
-                  setEvents(prev => [...prev, { minute: minute + 1, type: 'CHANCE', description: `Close! ${String(shooter.name)} shoots but the keeper saves it.`, teamName: liveMyTeam.name }]);
-                  nextZone = ZONES.DEFENSE; // Counter attack risk
-                  newMomentum -= 10;
-                  playSound('KICK');
+                  // TACKLED
+                  nextPossession = 'AWAY';
+                  nextZone = ZONES.MIDFIELD;
+                  setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `Great tackle by ${String(oppDef.name)} to stop the attack.`, teamName: opponent.name }]);
               }
           } else {
-              // Lost possession
+              // Opponent has ball in their attack (shouldn't happen if zones logic holds, but acts as their defense clearing)
               nextZone = ZONES.MIDFIELD;
-              if (Math.random() > 0.8) setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `Attack breaks down for ${String(liveMyTeam.name)}.`, teamName: liveMyTeam.name }]);
           }
-      } 
+      }
+
+      // DEFENSIVE PHASE (Zone -1 - My Defense / Opp Attack)
       else if (ballZone === ZONES.DEFENSE) {
-          // DEFENDING PHASE
-          const myDef = getRandomPlayer(liveMyTeam, [Position.DEF, Position.GK]);
-          const defRoll = myDef.defending + (myDef.physical/2) + (liveMyTeam.tactics.defensiveLine === DefensiveLine.DEEP ? 10 : 0);
-          
-          if (Math.random() * 180 < defRoll) {
-              // TACKLE / INTERCEPTION
-              nextZone = ZONES.MIDFIELD;
-              setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `Brilliant tackle by ${String(myDef.name)} to win the ball back.`, teamName: liveMyTeam.name }]);
-              newMomentum += 5;
-          } else {
-              // OPPONENT CHANCE
-              const xg = 0.1 + (Math.random() * 0.4);
-              setStats(s => ({ ...s, shotsAway: s.shotsAway + 1, xgAway: (s.xgAway || 0) + xg }));
-              
-              if (Math.random() > 0.6) { // 40% goal chance if defense broken
-                   event = { minute: minute + 1, type: 'GOAL', description: `GOAL! ${String(opponent.name)} scores!`, teamName: opponent.name };
-                   setScore(s => ({ ...s, away: s.away + 1 }));
-                   nextZone = ZONES.MIDFIELD;
-                   newMomentum = 30;
-                   playSound('GOAL');
+          if (possessionSide === 'AWAY') {
+              const myDef = getBestPlayerForAction(liveMyTeam, [Position.DEF], 'defending');
+              const myGK = getBestPlayerForAction(liveMyTeam, [Position.GK], 'rating'); // Use rating as generic GK stat
+              const oppAtt = getBestPlayerForAction(opponent, [Position.FWD], 'shooting');
+
+              let defRoll = myDef.defending + (liveMyTeam.tactics.defensiveLine === DefensiveLine.DEEP ? 10 : 0);
+              let attRoll = oppAtt.dribbling + oppAtt.shooting;
+
+              // High press helps avoid getting here, but once here, high press leaves gaps
+              if (liveMyTeam.tactics.pressing === PressingIntensity.GEGENPRESS) defRoll -= 10; 
+
+              if (Math.random() * (defRoll + attRoll) < defRoll) {
+                  // WE DEFENDED
+                  nextPossession = 'HOME';
+                  nextZone = ZONES.MIDFIELD;
+                  setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(myDef.name)} clears the danger.`, teamName: liveMyTeam.name }]);
               } else {
-                   setEvents(prev => [...prev, { minute: minute + 1, type: 'CHANCE', description: `${String(opponent.name)} shoots wide! A let off for ${String(liveMyTeam.name)}.`, teamName: opponent.name }]);
-                   nextZone = ZONES.MIDFIELD; // Goal kick
+                  // OPPONENT SHOOTS
+                  updateStats({ shotsAway: stats.shotsAway + 1 });
+                  const shotQuality = 70 + Math.random() * 20; // Opponent generic shot
+                  const gkQuality = myGK.rating + (myGK.condition/10) + Math.random() * 10;
+                  const xG = shotQuality / 200;
+                  updateStats({ xgAway: stats.xgAway + xG });
+
+                  if (shotQuality > gkQuality) {
+                      // GOAL CONCEDED
+                      event = { minute: minute + 1, type: 'GOAL', description: `GOAL! ${String(oppAtt.name)} scores for ${String(opponent.name)}.`, teamName: opponent.name };
+                      setScore(s => ({ ...s, away: s.away + 1 }));
+                      nextZone = ZONES.MIDFIELD;
+                      nextPossession = 'HOME';
+                      newMomentum = 30;
+                      playSound('GOAL');
+                  } else {
+                      // SAVE BY OUR GK
+                      event = { minute: minute + 1, type: 'CHANCE', description: `WHAT A SAVE! ${String(myGK.name)} keeps it out!`, teamName: liveMyTeam.name };
+                      nextZone = ZONES.DEFENSE; // Corner or rebound
+                      playSound('KICK');
+                  }
+              }
+          } else {
+              // We have ball in defense (Build up)
+              const myDef = getBestPlayerForAction(liveMyTeam, [Position.DEF], 'passing');
+              if (Math.random() > 0.2) {
+                  nextZone = ZONES.MIDFIELD; // Successful build up
+                  setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `${String(myDef.name)} plays it out from the back.`, teamName: liveMyTeam.name }]);
+              } else {
+                  nextPossession = 'AWAY'; // Error at back
+                  setEvents(prev => [...prev, { minute: minute + 1, type: 'NORMAL', description: `Mistake by ${String(myDef.name)}! Gave the ball away.`, teamName: liveMyTeam.name }]);
               }
           }
       }
 
       setMinute(m => m + 1);
       setBallZone(nextZone);
+      setPossessionSide(nextPossession);
       setMomentum(newMomentum);
       setMomentumData(prev => [...prev, { minute: minute + 1, value: newMomentum }]);
       
@@ -248,7 +340,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
           interval = setInterval(simulateMinute, speed === 1 ? 1000 : 100);
       }
       return () => clearInterval(interval);
-  }, [isPlaying, minute, ballZone, momentum, speed, liveMyTeam]); // Dependencies updated
+  }, [isPlaying, minute, ballZone, possessionSide, momentum, speed, liveMyTeam]);
 
   const handleMatchFinish = () => {
       const finalStats: MatchStats = {
@@ -349,8 +441,8 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
                                 onPlayerClick={() => {}} 
                             />
                             {/* Ball Position Indicator */}
-                            <div className="absolute top-4 right-4 bg-black/60 backdrop-blur px-3 py-1 rounded text-xs font-bold text-white border border-white/10">
-                                Ball: {ballZone === ZONES.ATTACK ? 'Attacking' : ballZone === ZONES.DEFENSE ? 'Defending' : 'Midfield'}
+                            <div className={`absolute top-4 right-4 px-3 py-1 rounded text-xs font-bold text-white border transition-colors ${possessionSide === 'HOME' ? 'bg-emerald-600 border-emerald-500' : 'bg-red-600 border-red-500'}`}>
+                                Ball: {ballZone === ZONES.ATTACK ? (possessionSide === 'HOME' ? 'Attacking' : 'Opp Counter') : ballZone === ZONES.DEFENSE ? (possessionSide === 'HOME' ? 'Defending' : 'Opp Attack') : 'Midfield Battle'}
                             </div>
                         </div>
 
@@ -419,7 +511,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
                                      >
                                          {Object.values(PressingIntensity).map(v => <option key={v} value={v}>{v.replace('_', ' ')}</option>)}
                                      </select>
-                                     <p className="text-[10px] text-slate-500 mt-1">Higher intensity drains stamina faster.</p>
+                                     <p className="text-[10px] text-slate-500 mt-1">High press wins ball higher but drains stamina.</p>
                                  </div>
                                  <div>
                                      <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Passing Style</label>
@@ -430,6 +522,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
                                      >
                                          {Object.values(PassingStyle).map(v => <option key={v} value={v}>{v}</option>)}
                                      </select>
+                                     <p className="text-[10px] text-slate-500 mt-1">Direct passing is risky but fast.</p>
                                  </div>
                                  <div>
                                      <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Defensive Line</label>
@@ -487,7 +580,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
                                     players={liveMyTeam.players} 
                                     formation={liveMyTeam.formation} 
                                     onPlayerClick={handlePitchPlayerClick}
-                                    highlightedPlayerId={null} // We could highlight swap targets here
+                                    highlightedPlayerId={null} 
                                  />
                              </div>
                          </div>
