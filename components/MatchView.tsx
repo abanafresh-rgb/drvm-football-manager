@@ -284,7 +284,7 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
           setEvents(prev => [...prev, { 
               minute, 
               type: 'SUBSTITUTION', 
-              description: `SUB: ${newPlayers[benchIdx].name} ON, ${newPlayers[pitchIdx].name} OFF`, 
+              description: `SUB: ${String(newPlayers[benchIdx].name)} ON, ${String(newPlayers[pitchIdx].name)} OFF`, 
               teamName: liveMyTeam.name 
           }]);
           setSelectedBenchPlayer(null);
@@ -296,12 +296,12 @@ const MatchView: React.FC<MatchViewProps> = ({ myTeam, opponent, onMatchEnd, sou
           ...prev,
           tactics: { ...prev.tactics, [key]: value }
       }));
-      setEvents(prev => [...prev, { minute, type: 'NORMAL', description: `Tactical Change: ${key} set to ${value}`, teamName: liveMyTeam.name }]);
+      setEvents(prev => [...prev, { minute, type: 'NORMAL', description: `Tactical Change: ${String(key)} set to ${String(value)}`, teamName: liveMyTeam.name }]);
   };
 
   const handleFormationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
       setLiveMyTeam(prev => ({ ...prev, formation: e.target.value }));
-      setEvents(prev => [...prev, { minute, type: 'NORMAL', description: `Formation changed to ${e.target.value}`, teamName: liveMyTeam.name }]);
+      setEvents(prev => [...prev, { minute, type: 'NORMAL', description: `Formation changed to ${String(e.target.value)}`, teamName: liveMyTeam.name }]);
   };
 
   const handlePitchPlayerClick = (player: Player) => {

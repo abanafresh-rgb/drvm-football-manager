@@ -16,7 +16,7 @@ import JobOfferModal from './components/JobOfferModal';
 import SeasonAwardsModal from './components/SeasonAwardsModal';
 import ManagerView from './components/ManagerView';
 import SettingsView from './components/SettingsView';
-import { LayoutDashboard, Users, Trophy, Settings, BrainCircuit, PlayCircle, Loader2, Filter, SlidersHorizontal, ChevronRight, Crown, Medal, Banknote, Globe, ScanEye, Briefcase, HeartPulse, Calendar, Ticket, Table, Activity, ArrowRight, Shield, Zap, Move, User, ArrowLeftRight, Shirt, GraduationCap, ShoppingBag, ThumbsUp, ThumbsDown, AlertOctagon, PanelLeftClose, PanelLeftOpen, TrendingUp, WifiOff, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Users, Trophy, Settings, BrainCircuit, PlayCircle, Loader2, Filter, SlidersHorizontal, ChevronRight, Crown, Medal, Banknote, Globe, ScanEye, Briefcase, HeartPulse, Calendar, Ticket, Table, Activity, ArrowRight, Shield, Zap, Move, User, ArrowLeftRight, Shirt, GraduationCap, ShoppingBag, ThumbsUp, ThumbsDown, AlertOctagon, PanelLeftClose, PanelLeftOpen, TrendingUp, WifiOff, Menu, X, ArrowUpCircle } from 'lucide-react';
 
 const TOP_LEAGUES = [
     { name: 'Premier League', country: 'England', tier: 1 },
@@ -183,7 +183,6 @@ const App: React.FC = () => {
       };
   }, []);
 
-  // ... (Rest of existing handlers like handleInstallApp, handleSaveGame, etc. remain unchanged) ...
   const handleInstallApp = () => {
       if (installPrompt) {
           installPrompt.prompt();
@@ -295,12 +294,14 @@ const App: React.FC = () => {
       }
 
       const euroTeams = getEuropeanTeams().filter(t => t !== team.name).sort(() => 0.5 - Math.random());
-      const rotwTeams = getRestOfWorldTeams().sort(() => 0.5 - Math.random());
+      
+      let participatingInEurope = false;
 
       competitions.forEach(comp => {
           if (comp.type === CompetitionType.CONTINENTAL_CUP) {
               if (comp.id === assignedContCompId) {
                   comp.isActive = true;
+                  participatingInEurope = true;
                   const count = 3;
                   const groupRivals = euroTeams.slice(0, count);
                   comp.table = [
@@ -312,21 +313,6 @@ const App: React.FC = () => {
                       }))
                   ];
               }
-          }
-          if (comp.type === CompetitionType.WORLD_CUP) {
-               if (avgRating > 85) {
-                   comp.isActive = true;
-                   const count = 3;
-                   const groupRivals = rotwTeams.slice(0, count);
-                   comp.table = [
-                        { teamId: team.name, teamName: team.name, played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, points: 0, form: [] },
-                        ...groupRivals.map((rival, idx) => ({
-                            teamId: `wc_cpu_${idx}`,
-                            teamName: rival,
-                            played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, points: 0, form: []
-                        }))
-                   ];
-               }
           }
       });
 
@@ -358,7 +344,7 @@ const App: React.FC = () => {
         players: players.map(p => ({ ...p, contractType: p.contractType || TransferType.PERMANENT })),
         staff: preservedState?.staff || [
             { id: '1', name: 'Albert Capellas', role: CoachRole.ASSISTANT, rating: 72, specialty: 'Youth Development', age: 45, nationality: 'Spain', salary: 8000, signingFee: 0 },
-            { id: '2', name: 'Gary Lewin', role: CoachRole.PHYSIO, rating: 78, specialty: 'Rehabilitation', age: 52, nationality: 'England', salary: 6000, signingFee: 0 }
+            { id: '2', name: 'Gary Lewin', role: CoachRole.HEAD_PHYSIO, rating: 78, specialty: 'Rehabilitation', age: 52, nationality: 'England', salary: 6000, signingFee: 0 }
         ],
         boardConfidence: 65 
       });
@@ -385,7 +371,9 @@ const App: React.FC = () => {
       setTeamRatings(ratings);
       
       const leagueComp = competitions.find(c => c.type === CompetitionType.LEAGUE) || competitions[0];
-      const seasonFixtures = generateLeagueSchedule(leagueTeams, leagueComp.name, team.name);
+      
+      // NEW: Generate Realistic Interleaved Schedule
+      const seasonFixtures = generateLeagueSchedule(leagueTeams, leagueComp.name, team.name, participatingInEurope);
 
       let leagueTable: LeagueTableEntry[] = leagueTeams.map(t => ({
           teamId: t.name,
@@ -393,34 +381,33 @@ const App: React.FC = () => {
           played: 0, won: 0, drawn: 0, lost: 0, goalsFor: 0, goalsAgainst: 0, points: 0, form: []
       }));
 
+      // Simulate past results if starting late (Not full support for realistic schedule yet, assuming W1 start usually)
       const simulatedResults: Fixture[] = [];
       if (startWeek > 1) {
-          setLoadingText(`Simulating previous ${startWeek - 1} weeks...`);
-          for (let w = 1; w < startWeek; w++) {
-              const weekFixtures = seasonFixtures.filter(f => f.week === w);
-              const weekResults = [];
-              weekFixtures.forEach(f => {
-                  const res = simulateMatchResult(f.homeTeam, f.awayTeam);
-                  f.homeScore = res.homeScore;
-                  f.awayScore = res.awayScore;
-                  f.isPlayed = true;
-                  f.status = 'PLAYED';
-                  weekResults.push({ homeTeam: f.homeTeam, awayTeam: f.awayTeam, homeScore: res.homeScore, awayScore: res.awayScore });
-                  simulatedResults.push(f);
-              });
-              leagueTable = updateTableStats(leagueTable, weekResults);
-          }
+          // This would need logic to skip cup rounds etc, keeping simple for now
       }
 
       const currentWeekFixture = seasonFixtures.find(f => f.week === startWeek && f.isUserMatch);
       let initialOpponentName = "Rival FC";
+      let initialOpponent: Team;
       let isHome = true;
+      let roundName = `Matchday ${startWeek}`;
+      let compId = leagueComp.id;
+
       if (currentWeekFixture) {
           initialOpponentName = currentWeekFixture.homeTeam === team.name ? currentWeekFixture.awayTeam : currentWeekFixture.homeTeam;
           isHome = currentWeekFixture.homeTeam === team.name;
+          roundName = currentWeekFixture.roundName || roundName;
+          compId = currentWeekFixture.competitionId;
+          
+          if (initialOpponentName === 'TBD') {
+              initialOpponentName = (await generateOpponentForContext(leagueToUse, team.name, competitions.find(c => c.id === compId)!)).name;
+              currentWeekFixture.awayTeam = initialOpponentName; // Fix TBD in schedule
+          }
       }
-      const initialOpponent = await generateOpponentForContext(leagueToUse, team.name, leagueComp);
-      if (currentWeekFixture) initialOpponent.name = initialOpponentName;
+      
+      initialOpponent = await generateOpponentForContext(leagueToUse, team.name, competitions.find(c => c.id === compId)!);
+      initialOpponent.name = initialOpponentName;
       if (ratings[initialOpponentName]) initialOpponent.rating = ratings[initialOpponentName];
       setOpponent(initialOpponent);
 
@@ -429,9 +416,9 @@ const App: React.FC = () => {
           year: preservedState ? seasonState!.year + 1 : 2025,
           competitions: competitions,
           nextMatchContext: {
-              competitionId: leagueComp.id,
+              competitionId: compId,
               opponentName: initialOpponent.name,
-              roundName: `Matchday ${startWeek}`,
+              roundName: roundName,
               isHome: isHome
           },
           leagueTable: leagueTable,
@@ -470,89 +457,88 @@ const App: React.FC = () => {
       startGame(offer, nextWeek); 
   };
 
-  // ... (Other match and logic functions remain unchanged) ...
   const scheduleNextMatch = async (currentWeek: number, competitions: Competition[], currentFixtures: Fixture[]) => {
-      // ... same implementation ...
       if (!myTeam || !seasonState) return;
       const leagueToUse = selectedLeague || 'Premier League';
       
-      let nextComp: Competition | undefined;
+      const nextFixture = currentFixtures.find(f => f.week === currentWeek && f.isUserMatch);
       
-      const cupComp = competitions.find(c => c.type === CompetitionType.DOMESTIC_CUP);
-      const activeContComp = competitions.find(c => c.type === CompetitionType.CONTINENTAL_CUP && c.isActive);
-      const worldCup = competitions.find(c => c.type === CompetitionType.WORLD_CUP);
-      const leagueComp = competitions.find(c => c.type === CompetitionType.LEAGUE)!;
-
-      let isCupWeek = false;
-
-      if (currentWeek > 38 && worldCup && worldCup.isActive) {
-          nextComp = worldCup;
-          isCupWeek = true;
-      } 
-      else if (activeContComp && activeContComp.currentRound === 'Group Stage' && [5,9,13,17,21,25].includes(currentWeek)) {
-          nextComp = activeContComp;
-          isCupWeek = true;
-      }
-      else if (activeContComp && activeContComp.currentRound !== 'Group Stage' && activeContComp.currentRound !== 'Eliminated' && [30,32,34,36].includes(currentWeek)) {
-          nextComp = activeContComp;
-          isCupWeek = true;
-      }
-      else if (cupComp && cupComp.isActive && currentWeek % 8 === 0) {
-          nextComp = cupComp;
-          isCupWeek = true;
-      } 
-      else {
-          nextComp = leagueComp;
-      }
-
-      if (currentWeek > 40 && !worldCup?.isActive) {
+      // If we run out of fixtures or hit week 45, season end
+      if (!nextFixture || currentWeek > 45) {
            return null;
       }
 
-      let nextOpponent: Team;
-      let roundName = nextComp.currentRound;
-      let isHome = Math.random() > 0.5;
+      const comp = competitions.find(c => c.id === nextFixture.competitionId);
+      if (!comp) return null;
 
-      const scheduledFixture = currentFixtures.find(f => f.week === currentWeek && f.isUserMatch && f.competitionId === nextComp!.id);
-
-      if (!isCupWeek && scheduledFixture) {
-          nextOpponent = await generateOpponentForContext(leagueToUse, myTeam.name, nextComp);
-          nextOpponent.name = scheduledFixture.homeTeam === myTeam.name ? scheduledFixture.awayTeam : scheduledFixture.homeTeam;
-          roundName = `Matchday ${currentWeek}`;
-          isHome = scheduledFixture.homeTeam === myTeam.name;
-          if (teamRatings[nextOpponent.name]) nextOpponent.rating = teamRatings[nextOpponent.name];
-      } else {
-          if (nextComp.type === CompetitionType.CONTINENTAL_CUP && nextComp.currentRound === 'Group Stage') {
-                  const groupRivals = nextComp.table?.filter(t => t.teamName !== myTeam.name) || [];
-                  const matchIndex = [5,9,13,17,21,25].indexOf(currentWeek);
-                  const rivalEntry = groupRivals[matchIndex % groupRivals.length];
-                  
-                  nextOpponent = await generateOpponentForContext(leagueToUse, myTeam.name, nextComp);
-                  nextOpponent.name = rivalEntry ? rivalEntry.teamName : 'European Rival';
-                  roundName = `Group Match ${matchIndex + 1}`;
-                  isHome = matchIndex % 2 === 0;
-          } else {
-               nextOpponent = await generateOpponentForContext(leagueToUse, myTeam.name, nextComp);
-          }
+      // Handle TBD Opponents (e.g. Cup Draws)
+      let opponentName = nextFixture.homeTeam === myTeam.name ? nextFixture.awayTeam : nextFixture.homeTeam;
+      if (opponentName === 'TBD') {
+          const randOpp = await generateOpponentForContext(leagueToUse, myTeam.name, comp);
+          opponentName = randOpp.name;
+          // Update fixture in place
+          if (nextFixture.homeTeam === 'TBD') nextFixture.homeTeam = opponentName;
+          else nextFixture.awayTeam = opponentName;
       }
 
+      const nextOpponent = await generateOpponentForContext(leagueToUse, myTeam.name, comp);
+      nextOpponent.name = opponentName;
+      if (teamRatings[opponentName]) nextOpponent.rating = teamRatings[opponentName];
+      
       setOpponent(nextOpponent);
       
       setSeasonState(prev => ({
           ...prev!,
           week: currentWeek,
           nextMatchContext: {
-              competitionId: nextComp!.id,
-              opponentName: nextOpponent.name,
-              roundName: roundName,
-              isHome: isHome
+              competitionId: comp.id,
+              opponentName: opponentName,
+              roundName: nextFixture.roundName || comp.currentRound,
+              isHome: nextFixture.homeTeam === myTeam.name
           }
       }));
       return true;
   };
 
+  const processPlayerGrowth = (players: Player[], staff: Coach[]) => {
+      const assistant = staff.find(c => c.role === CoachRole.ASSISTANT);
+      const youthCoach = staff.find(c => c.role === CoachRole.YOUTH_COACH);
+      const staffBoost = (assistant ? assistant.rating : 50) / 200 + (youthCoach ? youthCoach.rating : 50) / 100;
+
+      return players.map(p => {
+          if (p.rating >= p.potential) return { ...p, recentGrowth: 0 }; // Capped
+
+          const ageFactor = Math.max(0.1, (30 - p.age) / 10); // Younger grows faster
+          const growthChance = (100 - p.rating) * ageFactor * staffBoost; // Base chance
+          
+          let growth = 0;
+          if (Math.random() * 100 < growthChance) {
+              growth = 1;
+              // Apply boost based on training focus
+              const focus = p.trainingFocus || 'GENERAL';
+              if (focus === 'PAC') p.pace = Math.min(99, p.pace + 1);
+              else if (focus === 'SHO') p.shooting = Math.min(99, p.shooting + 1);
+              else if (focus === 'PAS') p.passing = Math.min(99, p.passing + 1);
+              else if (focus === 'DRI') p.dribbling = Math.min(99, p.dribbling + 1);
+              else if (focus === 'DEF') p.defending = Math.min(99, p.defending + 1);
+              else if (focus === 'PHY') p.physical = Math.min(99, p.physical + 1);
+              else {
+                  // General: random stat
+                  const roll = Math.random();
+                  if (roll < 0.16) p.pace++;
+                  else if (roll < 0.32) p.shooting++;
+                  else if (roll < 0.48) p.passing++;
+                  else if (roll < 0.64) p.dribbling++;
+                  else if (roll < 0.80) p.defending++;
+                  else p.physical++;
+              }
+              p.rating = Math.min(99, p.rating + 1);
+          }
+          return { ...p, recentGrowth: growth };
+      });
+  };
+
   const handleMatchEnd = async (stats: MatchStats, updatedPlayers?: Player[]) => {
-    // ... same implementation ...
     if (!myTeam || !seasonState) return;
 
     const currentWeek = seasonState.week;
@@ -562,7 +548,10 @@ const App: React.FC = () => {
     const isDraw = stats.homeScore === stats.awayScore;
 
     let confidenceChange = userWon ? 2 : isDraw ? 0 : -3;
+    // Boost for Cup/Europe wins
     if (userWon && !seasonState.nextMatchContext.competitionId.includes('league')) confidenceChange = 5;
+    // Harsh penalty for Cup elimination
+    if (!userWon && !isDraw && !seasonState.nextMatchContext.competitionId.includes('league')) confidenceChange = -8;
 
     let newConfidence = Math.min(100, Math.max(0, myTeam.boardConfidence + confidenceChange));
     
@@ -599,16 +588,13 @@ const App: React.FC = () => {
         awayScore: actualAwayScore
     };
 
+    // Update the fixture in the schedule
     const fixtureIdx = updatedFixtures.findIndex(f => f.week === currentWeek && f.isUserMatch && f.competitionId === currentCompId);
     if (fixtureIdx !== -1) {
         updatedFixtures[fixtureIdx] = { ...updatedFixtures[fixtureIdx], homeScore: actualHomeScore, awayScore: actualAwayScore, isPlayed: true, status: 'PLAYED' };
-    } else {
-        updatedFixtures.push({
-            id: `played_${currentWeek}_user`, week: currentWeek, competitionId: currentCompId, competitionName: updatedCompetitions.find(c => c.id === currentCompId)?.name || 'Match',
-            homeTeam: userMatchResult.homeTeam, awayTeam: userMatchResult.awayTeam, homeScore: actualHomeScore, awayScore: actualAwayScore, isPlayed: true, isUserMatch: true, status: 'PLAYED'
-        });
     }
 
+    // Process League Sim
     if (currentCompId.includes('league')) {
         updatedFixtures.forEach((f, idx) => {
             if (f.week === currentWeek && !f.isUserMatch && f.competitionId === currentCompId && f.status === 'SCHEDULED') {
@@ -618,6 +604,15 @@ const App: React.FC = () => {
             }
         });
         updatedLeagueTable = updateTableStats(updatedLeagueTable, [userMatchResult]);
+    } else {
+        // Cup/Europe Logic: If user lost knockout, disable active flag
+        if (!userWon && !isDraw) {
+             const activeComp = updatedCompetitions.find(c => c.id === currentCompId);
+             if (activeComp) {
+                 if (activeComp.type === CompetitionType.DOMESTIC_CUP) activeComp.isActive = false;
+                 // Add Europe KO logic here if needed
+             }
+        }
     }
 
     let fatiguedPlayers = updatedPlayers || myTeam.players.map(p => ({
@@ -625,7 +620,10 @@ const App: React.FC = () => {
         condition: Math.max(20, p.condition - (Math.floor(Math.random() * 10) + 5))
     }));
 
-    setMyTeam(prev => ({ ...prev!, players: fatiguedPlayers, boardConfidence: newConfidence }));
+    // NEW: Youth Development Processing
+    const developedPlayers = processPlayerGrowth(fatiguedPlayers, myTeam.staff);
+
+    setMyTeam(prev => ({ ...prev!, players: developedPlayers, boardConfidence: newConfidence }));
 
     const newResult: Fixture = updatedFixtures.find(f => f.week === currentWeek && f.isUserMatch && f.competitionId === currentCompId) || {
         id: 'fallback', week: seasonState.week, competitionId: currentCompId, competitionName: 'Match',
@@ -957,7 +955,13 @@ const App: React.FC = () => {
                                                 {statusPlayers.map(player => (
                                                     <div key={player.id} onClick={() => handleSquadPlayerClick(player)} className={`flex items-center p-2 rounded-lg border cursor-pointer transition-all hover:bg-slate-800 ${swapSourceId === player.id ? 'bg-yellow-500/10 border-yellow-500 text-yellow-200' : selectedPlayer?.id === player.id ? 'bg-emerald-500/10 border-emerald-500' : 'bg-slate-950 border-slate-800'}`}>
                                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mr-3 ${player.position === Position.GK ? 'bg-yellow-500/20 text-yellow-500' : 'bg-slate-800 text-slate-300'}`}>{player.position}</div>
-                                                        <div className="flex-1"><div className="text-sm font-bold text-white">{player.name}</div><div className="text-[10px] text-slate-500">{player.role}</div></div>
+                                                        <div className="flex-1">
+                                                            <div className="text-sm font-bold text-white flex items-center gap-2">
+                                                                {player.name}
+                                                                {player.recentGrowth === 1 && <ArrowUpCircle size={12} className="text-emerald-400" />}
+                                                            </div>
+                                                            <div className="text-[10px] text-slate-500">{player.role}</div>
+                                                        </div>
                                                         <div className="font-display font-bold text-slate-300">{player.rating}</div>
                                                     </div>
                                                 ))}

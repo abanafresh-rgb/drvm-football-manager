@@ -70,9 +70,13 @@ export enum ContinentalTier {
 
 export enum CoachRole {
   ASSISTANT = 'Assistant Manager',
+  GK_COACH = 'Goalkeeping Coach',
+  ATT_COACH = 'Attacking Coach',
+  DEF_COACH = 'Defensive Coach',
   FITNESS = 'Fitness Coach',
-  PHYSIO = 'Physio',
-  SCOUT = 'Scout'
+  HEAD_PHYSIO = 'Head Physio',
+  SCOUT = 'Scout',
+  YOUTH_COACH = 'Youth Coach'
 }
 
 export enum PressingIntensity {
@@ -109,6 +113,8 @@ export interface Player {
   position: Position;
   role: string;
   rating: number;
+  potential: number; // Max rating cap
+  recentGrowth?: number; // Visual indicator for UI
   pace: number;
   shooting: number;
   passing: number;
@@ -212,6 +218,7 @@ export interface Fixture {
   isPlayed: boolean;
   isUserMatch?: boolean;
   status: 'SCHEDULED' | 'PLAYED';
+  roundName?: string; // e.g., "Round of 16"
 }
 
 export interface Competition {

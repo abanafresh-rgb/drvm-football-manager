@@ -4,10 +4,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Team, MatchEvent, Player, Position, SquadStatus, TeamCategory, InjuryStatus, TeamMetadata, Competition, CompetitionType, Fixture, MatchStats, JobOffer, Coach, CoachRole, TransferType, PressingIntensity, PassingStyle, DefensiveLine, LeagueTableEntry, SeasonAwards } from '../types';
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-const MODEL_NAME = 'gemini-3-flash-preview'; // Updated to valid model
+const MODEL_NAME = 'gemini-3-flash-preview'; 
 
 const EUROPEAN_CLUBS = [
-// ... existing array content ...
     'Real Madrid', 'Man City', 'Bayern Munich', 'Paris SG', 'Liverpool', 'Inter Milan', 
     'Arsenal', 'Bayer Leverkusen', 'Barcelona', 'Atlético Madrid', 'Juventus', 'AC Milan', 
     'Dortmund', 'RB Leipzig', 'Benfica', 'Sporting CP', 'Porto', 'PSV', 'Feyenoord',
@@ -56,25 +55,20 @@ const generateYouthPlayer = (index: number, category: TeamCategory, nationality:
     const isU23 = category === TeamCategory.U23;
     const age = isU23 ? 19 + Math.floor(Math.random() * 4) : 15 + Math.floor(Math.random() * 3);
     
-    // Rating calculation: U23s are closer to first team, U18s are raw
+    // Rating calculation
     let baseRating = isU23 ? teamRating - 15 : teamRating - 25;
-    
-    // Wonderkid Overrides
     if (isWonderkid) {
-        baseRating = Math.max(baseRating + 15, 72); // Wonderkids start high
+        baseRating = Math.max(baseRating + 15, 72); 
     }
-
-    // Ensure rating is an integer
-    const calculatedRating = Math.max(45, Math.min(isWonderkid ? 85 : 80, baseRating + Math.floor(Math.random() * 10) - 5));
-    const rating = Math.round(calculatedRating);
+    const rating = Math.round(Math.max(45, Math.min(isWonderkid ? 85 : 80, baseRating + Math.floor(Math.random() * 10) - 5)));
     
+    // Potential calculation
+    const potential = Math.min(99, rating + (isWonderkid ? 20 + Math.random() * 10 : 5 + Math.random() * 15));
+
     const positions = [Position.GK, Position.DEF, Position.MID, Position.FWD];
     const position = positions[Math.floor(Math.random() * positions.length)];
-    
-    // Name generation
     const firstName = getRandomItem(FIRST_NAMES);
     const lastName = getRandomItem(COMMON_SURNAMES);
-    
     const statsMultiplier = isWonderkid ? 1.2 : 1.0;
 
     return {
@@ -85,6 +79,7 @@ const generateYouthPlayer = (index: number, category: TeamCategory, nationality:
         position: position,
         role: isWonderkid ? 'Generational Talent' : (isU23 ? 'Reserve' : 'Academy Prospect'),
         rating: rating,
+        potential: Math.floor(potential),
         pace: Math.min(99, Math.floor((50 + Math.random() * 40) * statsMultiplier)),
         shooting: Math.min(99, Math.floor((40 + Math.random() * 40) * statsMultiplier)),
         passing: Math.min(99, Math.floor((40 + Math.random() * 40) * statsMultiplier)),
@@ -112,60 +107,44 @@ const generateYouthPlayer = (index: number, category: TeamCategory, nationality:
 export const generateAcademyIntake = (count: number, teamRating: number, nationality: string): Player[] => {
     const intake: Player[] = [];
     for (let i = 0; i < count; i++) {
-        // 5% chance of a Wonderkid (Extremely great stats)
         const isWonderkid = Math.random() < 0.05;
         intake.push(generateYouthPlayer(i, TeamCategory.U18, nationality, teamRating, isWonderkid));
     }
     return intake;
 };
 
-// ... keep existing code ...
 const generatePlayerHistory = (age: number, currentTeam: string, rating: number): any[] => {
+    // ... existing history logic
     const history = [];
-    const careerLength = age - 17; // Started at 17
+    const careerLength = age - 17; 
     if (careerLength <= 0) return [];
-
     let currentYear = 2024;
     let previousClub = currentTeam;
-    
-    // Generate 1-4 past transfers depending on age
     const numTransfers = Math.floor(Math.random() * Math.min(careerLength / 2, 4));
     const allClubs = [...EUROPEAN_CLUBS, ...ROTW_CLUBS];
-
     for(let i=0; i<numTransfers; i++) {
         const year = currentYear - Math.floor(1 + Math.random() * 3);
         currentYear = year;
-        
         const isAcademy = i === numTransfers - 1 && age < 23;
         let fromClub = isAcademy ? 'Academy' : getRandomItem(allClubs.filter(t => t !== previousClub));
         if (!fromClub) fromClub = 'Unknown FC';
-
         const type = isAcademy ? TransferType.ACADEMY : (Math.random() > 0.8 ? TransferType.LOAN : (Math.random() > 0.8 ? TransferType.FREE : TransferType.PERMANENT));
         const fee = type === TransferType.PERMANENT ? (rating * 100000 * (0.5 + Math.random())) : 0;
-
-        history.push({
-            season: `${year}/${year+1}`,
-            fromClub: fromClub,
-            toClub: previousClub,
-            fee: Math.floor(fee),
-            type: type
-        });
-
+        history.push({ season: `${year}/${year+1}`, fromClub: fromClub, toClub: previousClub, fee: Math.floor(fee), type: type });
         previousClub = fromClub;
         if (isAcademy) break;
     }
-    
     return history;
 };
 
 export const generateMatchCommentary = async (minute: number, myTeam: Team, opponent: Team, currentScore: {home: number, away: number}): Promise<MatchEvent | null> => {
+    // ... existing commentary logic
     const rand = Math.random();
     if (rand > 0.95) {
         const eventTypeRand = Math.random();
         let type: MatchEvent['type'] = 'NORMAL';
         let description = "";
         const teamName = Math.random() > 0.5 ? myTeam.name : opponent.name;
-
         if (eventTypeRand > 0.94) {
             type = 'GOAL';
             const scorer = teamName === myTeam.name ? myTeam.players.find(p=>p.position === Position.FWD)?.name || 'Striker' : 'Opponent Striker';
@@ -185,7 +164,6 @@ export const generateMatchCommentary = async (minute: number, myTeam: Team, oppo
         } else {
             description = `${teamName} is controlling the possession now, looking for an opening.`;
         }
-
         return { minute, description, type, teamName };
     }
     return null;
@@ -237,6 +215,7 @@ export const generateSquad = async (teamName: string, league: string): Promise<P
             position: p.position as Position,
             role: p.role,
             rating: p.rating,
+            potential: Math.min(99, p.rating + Math.floor(Math.random() * (30 - p.age) * 1.5)), // Dynamic potential based on age
             pace: Math.floor(Math.random() * 40) + 50,
             shooting: Math.floor(Math.random() * 40) + 50,
             passing: Math.floor(Math.random() * 40) + 50,
@@ -260,7 +239,6 @@ export const generateSquad = async (teamName: string, league: string): Promise<P
             awards: []
         }));
 
-        // 2. Determine Dominant Nationality and Average Rating for Youth Generation
         const nationalities = firstTeam.map(p => p.nationality);
         const modeNationality = nationalities.sort((a,b) =>
             nationalities.filter(v => v===a).length - nationalities.filter(v => v===b).length
@@ -268,7 +246,6 @@ export const generateSquad = async (teamName: string, league: string): Promise<P
         
         const avgRating = firstTeam.reduce((sum, p) => sum + p.rating, 0) / firstTeam.length;
 
-        // 3. Generate Youth Teams
         const u23Squad: Player[] = Array.from({ length: 15 }).map((_, i) => 
             generateYouthPlayer(i, TeamCategory.U23, modeNationality, avgRating)
         );
@@ -280,9 +257,8 @@ export const generateSquad = async (teamName: string, league: string): Promise<P
         return [...firstTeam, ...u23Squad, ...u18Squad];
 
     } catch (e) {
-        console.error("Failed to generate squad, using fallback", e);
-        // Fallback for failure
-        const fallbackSquad = Array.from({ length: 20 }).map((_, i) => ({
+        // Fallback
+        return Array.from({ length: 20 }).map((_, i) => ({
             id: `fallback_${i}`,
             name: `Player ${i}`,
             age: 24,
@@ -290,6 +266,7 @@ export const generateSquad = async (teamName: string, league: string): Promise<P
             position: i === 0 ? Position.GK : i < 6 ? Position.DEF : i < 11 ? Position.MID : Position.FWD,
             role: 'Player',
             rating: 70,
+            potential: 75,
             pace: 70, shooting: 70, passing: 70, dribbling: 70, defending: 70, physical: 70,
             marketValue: 1000000, wages: 5000, contractExpiry: 2027,
             squadStatus: i < 11 ? SquadStatus.STARTING : SquadStatus.SUB,
@@ -299,7 +276,6 @@ export const generateSquad = async (teamName: string, league: string): Promise<P
             history: [],
             awards: []
         }));
-        return fallbackSquad; 
     }
 };
 
@@ -345,6 +321,7 @@ export const generateLeagueTeams = async (leagueName: string): Promise<TeamMetad
 };
 
 export const generateJobOffers = async (reputation: number): Promise<JobOffer[]> => {
+    // ... existing job offer logic
     try {
         const response = await ai.models.generateContent({
             model: MODEL_NAME,
@@ -388,6 +365,7 @@ export const generateJobOffers = async (reputation: number): Promise<JobOffer[]>
 };
 
 export const getTacticalAdvice = async (myTeam: Team, opponentName: string): Promise<string> => {
+    // ... existing tactical advice
     try {
         const response = await ai.models.generateContent({
             model: MODEL_NAME,
@@ -402,6 +380,7 @@ export const getTacticalAdvice = async (myTeam: Team, opponentName: string): Pro
 };
 
 export const generateSeasonAwards = async (leagueTable: LeagueTableEntry[], myTeam: Team, year: number): Promise<SeasonAwards | null> => {
+    // ... existing awards logic
     try {
         const myTeamRank = leagueTable.findIndex(t => t.teamName === myTeam.name) + 1;
         const topScorerCandidate = myTeam.players.find(p => p.position === Position.FWD && p.rating > 80);
@@ -451,7 +430,6 @@ export const generateSeasonAwards = async (leagueTable: LeagueTableEntry[], myTe
     }
 };
 
-// ... keep existing code ...
 export const generateSeasonContext = async (leagueName: string): Promise<Competition[]> => {
     return [
         { id: 'league_1', name: leagueName, type: CompetitionType.LEAGUE, isActive: true, currentRound: 'Regular Season' },
@@ -462,8 +440,8 @@ export const generateSeasonContext = async (leagueName: string): Promise<Competi
     ];
 };
 
-// ... existing helper simulations ...
 export const generateOpponentForContext = async (leagueName: string, myTeamName: string, competition: Competition): Promise<Team> => {
+    // ... existing opponent gen
     let opponentName = '';
 
     if (competition.type === CompetitionType.CONTINENTAL_CUP) {
@@ -499,8 +477,10 @@ export const generateOpponentForContext = async (leagueName: string, myTeamName:
     };
 };
 
-export const generateLeagueSchedule = (teams: TeamMetadata[], competitionName: string, myTeamName: string): Fixture[] => {
-    // Simple Round Robin generator
+/**
+ * Creates a realistic season schedule interweaving League, Cup, and Europe.
+ */
+export const generateLeagueSchedule = (teams: TeamMetadata[], competitionName: string, myTeamName: string, participatingInEurope: boolean): Fixture[] => {
     const schedule: Fixture[] = [];
     const teamList = [...teams];
     if (teamList.length % 2 !== 0) teamList.push({ name: 'BYE', primaryColor: '', secondaryColor: '' }); // dummy
@@ -509,39 +489,118 @@ export const generateLeagueSchedule = (teams: TeamMetadata[], competitionName: s
     const numRounds = (numTeams - 1) * 2;
     const halfRounds = numTeams - 1;
 
+    // 1. Generate Basic Round Robin League Fixtures
+    const leagueFixtures: Fixture[] = [];
     for (let round = 0; round < numRounds; round++) {
         for (let i = 0; i < numTeams / 2; i++) {
             const homeIdx = (round + i) % (numTeams - 1);
             const awayIdx = (numTeams - 1 - i + round) % (numTeams - 1);
-            
             let t1 = teamList[homeIdx];
             let t2 = teamList[awayIdx];
-            
-            // Fix last team
-            if (i === 0) {
-                t2 = teamList[numTeams - 1];
-            }
+            if (i === 0) t2 = teamList[numTeams - 1];
 
             if (t1.name !== 'BYE' && t2.name !== 'BYE') {
-                // Swap home/away for second half of season
-                if (round >= halfRounds) {
-                    const temp = t1; t1 = t2; t2 = temp;
-                }
-
-                schedule.push({
-                    id: `fix_${round}_${t1.name}_${t2.name}`,
-                    week: round + 1,
+                if (round >= halfRounds) { const temp = t1; t1 = t2; t2 = temp; }
+                leagueFixtures.push({
+                    id: `fix_lge_${round}_${t1.name}_${t2.name}`,
+                    week: 0, // Assigned later
                     competitionId: 'league_1',
                     competitionName: competitionName,
                     homeTeam: t1.name,
                     awayTeam: t2.name,
                     isPlayed: false,
                     isUserMatch: t1.name === myTeamName || t2.name === myTeamName,
-                    status: 'SCHEDULED'
+                    status: 'SCHEDULED',
+                    roundName: `Matchday ${round + 1}`
                 });
             }
         }
     }
+
+    // 2. Define Master Calendar Template (Week by Week)
+    // L = League, C = Domestic Cup, E = Europe (Group/KO)
+    const calendarTemplate = [
+        'L', 'L', 'C_R64', 'L', 'E_G1', 'L', 'L', 'C_R32', 'E_G2', 'L', 'L', 
+        'E_G3', 'L', 'L', 'C_R16', 'E_G4', 'L', 'L', 'E_G5', 'L', 'L', 'C_QF',
+        'E_G6', 'L', 'L', 'L', 'E_R16_1', 'L', 'E_R16_2', 'L', 'C_SF', 'L', 
+        'E_QF_1', 'L', 'E_QF_2', 'L', 'E_SF_1', 'L', 'E_SF_2', 'C_F', 'E_F', 'L', 'L' 
+    ];
+
+    let leagueRoundCounter = 0;
+    
+    // 3. Map Fixtures to Weeks
+    calendarTemplate.forEach((type, index) => {
+        const week = index + 1;
+        
+        if (type === 'L') {
+            // Assign League Round
+            if (leagueRoundCounter < numRounds) {
+                // Find all fixtures for this round
+                // We generated them sequentially above, so we can just grab the block
+                // But since leagueFixtures is flat, we filter by logical round index
+                // Wait, easier way: just pull the next N/2 fixtures where N is numTeams
+                // Actually, logic above generated them in order of round 0..N
+                
+                // Let's re-find them by 'roundName' matching the counter
+                // The fixtures generated above have roundName `Matchday X`
+                const currentRoundLabel = `Matchday ${leagueRoundCounter + 1}`;
+                
+                // Assign week to this round's fixtures
+                // We iterate the whole array to find them
+                for (const fix of leagueFixtures) {
+                    if (fix.roundName === currentRoundLabel) {
+                        fix.week = week;
+                        schedule.push(fix);
+                    }
+                }
+                leagueRoundCounter++;
+            }
+        } 
+        else if (type.startsWith('C_')) {
+            // Domestic Cup Slot
+            const roundMap: Record<string, string> = {
+                'C_R64': 'Round of 64', 'C_R32': 'Round of 32', 'C_R16': 'Round of 16',
+                'C_QF': 'Quarter Final', 'C_SF': 'Semi Final', 'C_F': 'Final'
+            };
+            schedule.push({
+                id: `fix_cup_${week}`,
+                week: week,
+                competitionId: 'cup_1',
+                competitionName: 'Domestic Cup',
+                homeTeam: myTeamName, // Simplification: User always listed, randomization handles opponents later
+                awayTeam: 'TBD',
+                isPlayed: false,
+                isUserMatch: true,
+                status: 'SCHEDULED',
+                roundName: roundMap[type]
+            });
+        }
+        else if (type.startsWith('E_') && participatingInEurope) {
+            // Europe Slot
+            const roundMap: Record<string, string> = {
+                'E_G1': 'Group Stage', 'E_G2': 'Group Stage', 'E_G3': 'Group Stage',
+                'E_G4': 'Group Stage', 'E_G5': 'Group Stage', 'E_G6': 'Group Stage',
+                'E_R16_1': 'Round of 16 (1st Leg)', 'E_R16_2': 'Round of 16 (2nd Leg)',
+                'E_QF_1': 'Quarter Final (1st Leg)', 'E_QF_2': 'Quarter Final (2nd Leg)',
+                'E_SF_1': 'Semi Final (1st Leg)', 'E_SF_2': 'Semi Final (2nd Leg)',
+                'E_F': 'Final'
+            };
+            
+            schedule.push({
+                id: `fix_euro_${week}`,
+                week: week,
+                competitionId: 'cont_1', // Assuming top tier for now
+                competitionName: 'Champions Elite',
+                homeTeam: myTeamName,
+                awayTeam: 'European Rival',
+                isPlayed: false,
+                isUserMatch: true,
+                status: 'SCHEDULED',
+                roundName: roundMap[type]
+            });
+        }
+    });
+
     return schedule.sort((a,b) => a.week - b.week);
 };
 
@@ -558,6 +617,7 @@ export const generateHeadhuntOffers = async (reputation: number, league: string)
 };
 
 export const generateTransferMarket = async (count: number): Promise<Player[]> => {
+    // ... existing logic
      try {
         const response = await ai.models.generateContent({
             model: MODEL_NAME,
@@ -597,6 +657,7 @@ export const generateTransferMarket = async (count: number): Promise<Player[]> =
             position: p.position as Position,
             role: 'Transfer Target',
             rating: p.rating,
+            potential: Math.min(99, p.rating + 5),
             pace: 60 + Math.floor(Math.random()*30),
             shooting: 60 + Math.floor(Math.random()*30),
             passing: 60 + Math.floor(Math.random()*30),
@@ -621,6 +682,7 @@ export const generateTransferMarket = async (count: number): Promise<Player[]> =
 };
 
 export const generateScoutedPlayer = async (criteria: { region: string, position: string, ageGroup: string, scoutRating?: number }): Promise<Player | null> => {
+    // ... existing logic
      try {
         const qualityHint = criteria.scoutRating && criteria.scoutRating > 80 
             ? "The scout is world-class. Find a high potential 'hidden gem' or an elite player." 
@@ -665,6 +727,7 @@ export const generateScoutedPlayer = async (criteria: { region: string, position
             position: p.position as Position,
             role: p.playStyle || 'Scouted Talent',
             rating: p.rating,
+            potential: Math.min(99, p.rating + (30 - p.age) * 2),
             pace: 60 + Math.floor(Math.random()*35),
             shooting: 50 + Math.floor(Math.random()*40),
             passing: 50 + Math.floor(Math.random()*40),
@@ -691,10 +754,13 @@ export const generateScoutedPlayer = async (criteria: { region: string, position
 };
 
 export const generateStaffMarket = async (count: number): Promise<Coach[]> => {
+    // ... existing logic
     try {
         const response = await ai.models.generateContent({
             model: MODEL_NAME,
-            contents: `Generate ${count} REAL football coaches/staff (Current 2024/25 Season). Return JSON.`,
+            contents: `Generate ${count} REAL football coaches/staff (Current 2024/25 Season).
+            Include a mix of roles: Assistant Manager, Goalkeeping Coach, Defensive Coach, Attacking Coach, Fitness Coach, Head Physio, Scout, Youth Coach.
+            Return JSON.`,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -706,7 +772,7 @@ export const generateStaffMarket = async (count: number): Promise<Coach[]> => {
                                 type: Type.OBJECT,
                                 properties: {
                                     name: { type: Type.STRING },
-                                    role: { type: Type.STRING, enum: ['Assistant Manager', 'Fitness Coach', 'Physio', 'Scout'] },
+                                    role: { type: Type.STRING, enum: ['Assistant Manager', 'Goalkeeping Coach', 'Defensive Coach', 'Attacking Coach', 'Fitness Coach', 'Head Physio', 'Scout', 'Youth Coach'] },
                                     rating: { type: Type.NUMBER },
                                     specialty: { type: Type.STRING },
                                     nationality: { type: Type.STRING },
